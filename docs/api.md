@@ -54,7 +54,9 @@ Busy
 
 Calling `init()` twice returns `AlreadyInitialized`. Calling `deinit()` before init returns `Ok`.
 
-`transition()` returns a temporary builder. If transition creation fails, later `guard()` and `action()` calls are no-ops and preserve the original failure status.
+`transition()` returns a temporary builder. `FlowTransitionBuilder` is intended for immediate chained use directly from `transition()`. Do not store builders across other Flow mutations.
+
+If transition creation fails, later `guard()` and `action()` calls are no-ops and preserve the original failure status. If `guard()` or `action()` fails with `CallbackTooLarge`, Flow rolls back the transition created by that builder. This prevents a transition intended to be guarded or action-backed from remaining registered without the failed callback.
 
 `transitionPath()` is transactional. If any transition in the path cannot be registered, no transitions from that call are added.
 

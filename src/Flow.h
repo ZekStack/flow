@@ -88,11 +88,30 @@ template <typename State, size_t CallbackSize> class FlowTransitionBuilder {
 	    : _flow(flow), _index(index), _status(status) {
 	}
 
+	FlowTransitionBuilder(
+	    Flow<State, CallbackSize> *flow,
+	    uint16_t index,
+	    uint16_t preStateCount,
+	    State from,
+	    State to,
+	    FlowStatus status
+	)
+	    : _flow(flow), _index(index), _preStateCount(preStateCount), _from(from), _to(to),
+	      _rollbackEnabled(true), _status(status) {
+	}
+
 	template <typename Callback> FlowTransitionBuilder &guard(Callback callback) {
 		if (_status != FlowStatus::Ok || _flow == nullptr) {
 			return *this;
 		}
-		_status = _flow->setTransitionGuard(_index, std::move(callback));
+		_status = _flow->setTransitionGuard(
+		    _index,
+		    _preStateCount,
+		    _from,
+		    _to,
+		    _rollbackEnabled,
+		    std::move(callback)
+		);
 		return *this;
 	}
 
@@ -100,7 +119,14 @@ template <typename State, size_t CallbackSize> class FlowTransitionBuilder {
 		if (_status != FlowStatus::Ok || _flow == nullptr) {
 			return *this;
 		}
-		_status = _flow->setTransitionAction(_index, std::move(callback));
+		_status = _flow->setTransitionAction(
+		    _index,
+		    _preStateCount,
+		    _from,
+		    _to,
+		    _rollbackEnabled,
+		    std::move(callback)
+		);
 		return *this;
 	}
 
@@ -119,6 +145,10 @@ template <typename State, size_t CallbackSize> class FlowTransitionBuilder {
   private:
 	Flow<State, CallbackSize> *_flow = nullptr;
 	uint16_t _index = 0;
+	uint16_t _preStateCount = 0;
+	State _from{};
+	State _to{};
+	bool _rollbackEnabled = false;
 	FlowStatus _status = FlowStatus::NotInitialized;
 };
 
@@ -382,6 +412,7 @@ template <typename State, size_t CallbackSize> class Flow {
 			return Builder(this, 0, FlowStatus::MaxTransitionsReached);
 		}
 
+		const uint16_t preStateCount = _stateCount;
 		FlowStatus status = ensureState(from);
 		if (status != FlowStatus::Ok) {
 			return Builder(this, 0, status);
@@ -397,7 +428,7 @@ template <typename State, size_t CallbackSize> class Flow {
 		_transitions[index].hasGuard = false;
 		_transitions[index].hasAction = false;
 		_diag.transitionCount = _transitionCount;
-		return Builder(this, index, FlowStatus::Ok);
+		return Builder(this, index, preStateCount, from, to, FlowStatus::Ok);
 	}
 
 	FlowStatus transitionPath(std::initializer_list<State> states) {
@@ -543,7 +574,14 @@ template <typename State, size_t CallbackSize> class Flow {
 	};
 
 	template <typename CallbackType>
-	FlowStatus setTransitionGuard(uint16_t index, CallbackType callback) {
+	FlowStatus setTransitionGuard(
+	    uint16_t index,
+	    uint16_t preStateCount,
+	    State from,
+	    State to,
+	    bool rollbackEnabled,
+	    CallbackType callback
+	) {
 		FlowLock lock(_mutex, _config.threadSafe);
 		if (!lock) {
 			return FlowStatus::Busy;
@@ -553,6 +591,15 @@ template <typename State, size_t CallbackSize> class Flow {
 		}
 		if (!_transitions[index].guard.assign(std::move(callback))) {
 			_diag.callbackTooLargeCount++;
+			if (rollbackEnabled) {
+				return rollbackTransitionBuilderFailure(
+				    index,
+				    preStateCount,
+				    from,
+				    to,
+				    FlowStatus::CallbackTooLarge
+				);
+			}
 			return FlowStatus::CallbackTooLarge;
 		}
 		_transitions[index].hasGuard = true;
@@ -560,7 +607,14 @@ template <typename State, size_t CallbackSize> class Flow {
 	}
 
 	template <typename CallbackType>
-	FlowStatus setTransitionAction(uint16_t index, CallbackType callback) {
+	FlowStatus setTransitionAction(
+	    uint16_t index,
+	    uint16_t preStateCount,
+	    State from,
+	    State to,
+	    bool rollbackEnabled,
+	    CallbackType callback
+	) {
 		FlowLock lock(_mutex, _config.threadSafe);
 		if (!lock) {
 			return FlowStatus::Busy;
@@ -570,10 +624,44 @@ template <typename State, size_t CallbackSize> class Flow {
 		}
 		if (!_transitions[index].action.assign(std::move(callback))) {
 			_diag.callbackTooLargeCount++;
+			if (rollbackEnabled) {
+				return rollbackTransitionBuilderFailure(
+				    index,
+				    preStateCount,
+				    from,
+				    to,
+				    FlowStatus::CallbackTooLarge
+				);
+			}
 			return FlowStatus::CallbackTooLarge;
 		}
 		_transitions[index].hasAction = true;
 		return FlowStatus::Ok;
+	}
+
+	FlowStatus rollbackTransitionBuilderFailure(
+	    uint16_t index,
+	    uint16_t preStateCount,
+	    State from,
+	    State to,
+	    FlowStatus status
+	) {
+		if (index >= _transitionCount) {
+			return status;
+		}
+
+		for (uint16_t iterator = index; iterator + 1 < _transitionCount; iterator++) {
+			_transitions[iterator] = _transitions[iterator + 1];
+		}
+		_transitionCount--;
+		_diag.transitionCount = _transitionCount;
+
+		while (_stateCount > preStateCount &&
+		       canPruneBuilderState(_stateCount - 1, preStateCount, from, to)) {
+			_stateCount--;
+		}
+
+		return status;
 	}
 
 	template <typename CallbackType>
@@ -644,6 +732,38 @@ template <typename State, size_t CallbackSize> class Flow {
 			}
 		}
 		return nullptr;
+	}
+
+	bool transitionReferencesState(State state) const {
+		for (uint16_t index = 0; index < _transitionCount; index++) {
+			if (_transitions[index].from == state || _transitions[index].to == state) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool canPruneBuilderState(
+	    uint16_t index,
+	    uint16_t preStateCount,
+	    State from,
+	    State to
+	) const {
+		if (index < preStateCount) {
+			return false;
+		}
+
+		const StateEntry &entry = _states[index];
+		if (entry.state != from && entry.state != to) {
+			return false;
+		}
+		if (entry.state == _current || entry.state == _previous) {
+			return false;
+		}
+		if (transitionReferencesState(entry.state)) {
+			return false;
+		}
+		return !entry.hasOnEnter && !entry.hasOnExit;
 	}
 
 	bool stateExistsInPathPrefixOrFlow(

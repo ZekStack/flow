@@ -269,6 +269,101 @@ static void testLimitsAndCallbackSize() {
 	);
 }
 
+static void testBuilderCallbackFailureRollsBackTransition() {
+	struct LargeGuard {
+		char data[32]{};
+		bool operator()() {
+			return data[0] == 0;
+		}
+	};
+
+	struct LargeAction {
+		char data[32]{};
+		void operator()() {
+			data[0] = 1;
+		}
+	};
+
+	{
+		Flow<State, 8> flow;
+		FlowConfig config;
+		config.maxStates = 2;
+		config.maxTransitions = 1;
+		assert(flow.init(config, State::Idle));
+
+		assert(
+		    flow.transition(State::Idle, State::Ready)
+		        .guard(LargeGuard{})
+		        .status() == FlowStatus::CallbackTooLarge
+		);
+		assert(flow.getDiagnostics().transitionCount == 0);
+		assert(flow.setState(State::Ready) == FlowStatus::NoTransition);
+	}
+
+	{
+		Flow<State, 8> flow;
+		FlowConfig config;
+		config.maxStates = 2;
+		config.maxTransitions = 1;
+		assert(flow.init(config, State::Idle));
+
+		assert(
+		    flow.transition(State::Idle, State::Ready)
+		        .action(LargeAction{})
+		        .status() == FlowStatus::CallbackTooLarge
+		);
+		assert(flow.getDiagnostics().transitionCount == 0);
+		assert(flow.setState(State::Ready) == FlowStatus::NoTransition);
+	}
+
+	{
+		Flow<State, 8> flow;
+		FlowConfig config;
+		config.maxStates = 2;
+		config.maxTransitions = 1;
+		assert(flow.init(config, State::Idle));
+
+		assert(
+		    flow.transition(State::Idle, State::Ready)
+		        .guard(LargeGuard{})
+		        .action([]() {})
+		        .status() == FlowStatus::CallbackTooLarge
+		);
+		assert(flow.getDiagnostics().transitionCount == 0);
+		assert(flow.setState(State::Ready) == FlowStatus::NoTransition);
+	}
+
+	{
+		Flow<State, 8> flow;
+		FlowConfig config;
+		config.maxStates = 2;
+		config.maxTransitions = 1;
+		assert(flow.init(config, State::Idle));
+
+		assert(
+		    flow.transition(State::Idle, State::Ready)
+		        .guard(LargeGuard{})
+		        .status() == FlowStatus::CallbackTooLarge
+		);
+		assert(flow.getDiagnostics().transitionCount == 0);
+		assert(flow.onEnter(State::Starting, []() {}) == FlowStatus::Ok);
+	}
+
+	{
+		Flow<State, 8> flow;
+		FlowConfig config;
+		config.maxStates = 2;
+		config.maxTransitions = 1;
+		assert(flow.init(config, State::Idle));
+
+		auto builder = flow.transition(State::Idle, State::Ready);
+		assert(flow.onEnter(State::Ready, []() {}) == FlowStatus::Ok);
+		assert(builder.guard(LargeGuard{}).status() == FlowStatus::CallbackTooLarge);
+		assert(flow.getDiagnostics().transitionCount == 0);
+		assert(flow.onEnter(State::Ready, []() {}) == FlowStatus::CallbackAlreadyRegistered);
+	}
+}
+
 static void testTransactionalTransitionPath() {
 	{
 		Flow<State> flow;
@@ -431,6 +526,7 @@ int main() {
 	testGuardDeinitReturningTrue();
 	testExitActionAndEnterDeinitBehavior();
 	testLimitsAndCallbackSize();
+	testBuilderCallbackFailureRollsBackTransition();
 	testTransactionalTransitionPath();
 	testUndefinedTransitionsRegisterTargetStates();
 	testAllowSameState();
