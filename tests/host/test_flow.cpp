@@ -270,6 +270,32 @@ static void testLimitsAndCallbackSize() {
 }
 
 static void testBuilderCallbackFailureRollsBackTransition() {
+	struct TrackingGuard {
+		int *live = nullptr;
+
+		explicit TrackingGuard(int &counter) : live(&counter) {
+			(*live)++;
+		}
+
+		TrackingGuard(const TrackingGuard &other) : live(other.live) {
+			(*live)++;
+		}
+
+		TrackingGuard(TrackingGuard &&other) noexcept : live(other.live) {
+			(*live)++;
+		}
+
+		~TrackingGuard() {
+			if (live != nullptr) {
+				(*live)--;
+			}
+		}
+
+		bool operator()() {
+			return false;
+		}
+	};
+
 	struct LargeGuard {
 		char data[32]{};
 		bool operator()() {
@@ -362,6 +388,38 @@ static void testBuilderCallbackFailureRollsBackTransition() {
 		assert(flow.getDiagnostics().transitionCount == 0);
 		assert(flow.onEnter(State::Ready, []() {}) == FlowStatus::CallbackAlreadyRegistered);
 	}
+
+	{
+		Flow<State, 8> flow;
+		FlowConfig config;
+		config.maxStates = 2;
+		config.maxTransitions = 1;
+		assert(flow.init(config, State::Idle));
+
+		int liveGuards = 0;
+		assert(
+		    flow.transition(State::Idle, State::Ready)
+		        .guard(TrackingGuard{liveGuards})
+		        .action(LargeAction{})
+		        .status() == FlowStatus::CallbackTooLarge
+		);
+		assert(liveGuards == 0);
+		assert(flow.getDiagnostics().transitionCount == 0);
+		assert(flow.transition(State::Idle, State::Ready).status() == FlowStatus::Ok);
+		assert(flow.setState(State::Ready) == FlowStatus::Changed);
+	}
+}
+
+static void testTransitionIsTransactionalOnStateCapacityFailure() {
+	Flow<State> flow;
+	FlowConfig config;
+	config.maxStates = 2;
+	config.maxTransitions = 1;
+	assert(flow.init(config, State::Idle));
+
+	assert(flow.transition(State::Starting, State::Ready).status() == FlowStatus::MaxStatesReached);
+	assert(flow.getDiagnostics().transitionCount == 0);
+	assert(flow.onEnter(State::Ready, []() {}) == FlowStatus::Ok);
 }
 
 static void testTransactionalTransitionPath() {
@@ -527,6 +585,7 @@ int main() {
 	testExitActionAndEnterDeinitBehavior();
 	testLimitsAndCallbackSize();
 	testBuilderCallbackFailureRollsBackTransition();
+	testTransitionIsTransactionalOnStateCapacityFailure();
 	testTransactionalTransitionPath();
 	testUndefinedTransitionsRegisterTargetStates();
 	testAllowSameState();

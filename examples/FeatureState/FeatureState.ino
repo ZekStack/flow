@@ -66,13 +66,17 @@ class StorageFeature {
 		return FlowResult::ok();
 	}
 
-	void start() {
-		_flow.setState(StorageState::Mounting);
+	FlowStatus start() {
+		return _flow.setState(StorageState::Mounting);
 	}
 
-	void handleMounted() {
+	FlowStatus handleMounted() {
 		_mounted = true;
-		_flow.setState(StorageState::Ready);
+		return _flow.setState(StorageState::Ready);
+	}
+
+	const char *statusToString(FlowStatus status) const {
+		return _flow.statusToString(status);
 	}
 
 	bool ready() const {
@@ -105,8 +109,16 @@ void setup() {
 		Serial.println(result.message);
 		return;
 	}
-	storage.start();
-	storage.handleMounted();
+	FlowStatus status = storage.start();
+	if (status != FlowStatus::Changed) {
+		Serial.println(storage.statusToString(status));
+		return;
+	}
+	status = storage.handleMounted();
+	if (status != FlowStatus::Changed) {
+		Serial.println(storage.statusToString(status));
+		return;
+	}
 }
 
 void loop() {

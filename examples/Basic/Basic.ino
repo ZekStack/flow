@@ -41,8 +41,16 @@ void setup() {
 		return;
 	}
 
-	flow.setState(State::Starting);
-	flow.setState(State::Ready);
+	FlowStatus status = flow.setState(State::Starting);
+	if (status != FlowStatus::Changed) {
+		Serial.println(flow.statusToString(status));
+		return;
+	}
+	status = flow.setState(State::Ready);
+	if (status != FlowStatus::Changed) {
+		Serial.println(flow.statusToString(status));
+		return;
+	}
 }
 
 void loop() {

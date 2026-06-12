@@ -413,16 +413,25 @@ template <typename State, size_t CallbackSize> class Flow {
 		}
 
 		const uint16_t preStateCount = _stateCount;
-		FlowStatus status = ensureState(from);
-		if (status != FlowStatus::Ok) {
-			return Builder(this, 0, status);
+		uint16_t requiredStates = 0;
+		const bool fromExists = findState(from) != nullptr;
+		const bool toExists = findState(to) != nullptr;
+		if (!fromExists) {
+			requiredStates++;
 		}
-		status = ensureState(to);
-		if (status != FlowStatus::Ok) {
-			return Builder(this, 0, status);
+		if (!toExists && (fromExists || !(to == from))) {
+			requiredStates++;
+		}
+		if (_stateCount + requiredStates > _config.maxStates) {
+			return Builder(this, 0, FlowStatus::MaxStatesReached);
 		}
 
+		ensureState(from);
+		ensureState(to);
+
 		const uint16_t index = _transitionCount++;
+		_transitions[index].guard.reset();
+		_transitions[index].action.reset();
 		_transitions[index].from = from;
 		_transitions[index].to = to;
 		_transitions[index].hasGuard = false;
@@ -655,6 +664,7 @@ template <typename State, size_t CallbackSize> class Flow {
 		}
 		_transitionCount--;
 		_diag.transitionCount = _transitionCount;
+		resetTransitionSlot(_transitionCount);
 
 		while (_stateCount > preStateCount &&
 		       canPruneBuilderState(_stateCount - 1, preStateCount, from, to)) {
@@ -732,6 +742,15 @@ template <typename State, size_t CallbackSize> class Flow {
 			}
 		}
 		return nullptr;
+	}
+
+	void resetTransitionSlot(uint16_t index) {
+		_transitions[index].guard.reset();
+		_transitions[index].action.reset();
+		_transitions[index].hasGuard = false;
+		_transitions[index].hasAction = false;
+		_transitions[index].from = State{};
+		_transitions[index].to = State{};
 	}
 
 	bool transitionReferencesState(State state) const {
