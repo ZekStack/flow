@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <new>
 
 uint32_t flowTestMillis = 100;
@@ -164,6 +165,79 @@ static void testGuardsAndCallbacks() {
 	assert(flow.getDiagnostics().guardRejectedCount == 1);
 }
 
+static void testGuardDeinitReturningTrue() {
+	Flow<State> flow;
+	FlowConfig config;
+	config.maxStates = 2;
+	config.maxTransitions = 1;
+	assert(flow.init(config, State::Idle));
+	assert(
+	    flow.transition(State::Idle, State::Ready)
+	        .guard([&flow]() {
+		        flow.deinit();
+		        return true;
+	        })
+	        .status() == FlowStatus::Ok
+	);
+
+	assert(flow.setState(State::Ready) == FlowStatus::NotInitialized);
+	assert(!flow.initialized());
+}
+
+static void testExitActionAndEnterDeinitBehavior() {
+	{
+		Flow<State> flow;
+		FlowConfig config;
+		config.maxStates = 2;
+		config.maxTransitions = 1;
+		assert(flow.init(config, State::Idle));
+		assert(flow.transition(State::Idle, State::Ready).status() == FlowStatus::Ok);
+		assert(
+		    flow.onExit(State::Idle, [&flow]() {
+			    flow.deinit();
+		    }) == FlowStatus::Ok
+		);
+
+		assert(flow.setState(State::Ready) == FlowStatus::NotInitialized);
+		assert(!flow.initialized());
+	}
+
+	{
+		Flow<State> flow;
+		FlowConfig config;
+		config.maxStates = 2;
+		config.maxTransitions = 1;
+		assert(flow.init(config, State::Idle));
+		assert(
+		    flow.transition(State::Idle, State::Ready)
+		        .action([&flow]() {
+			        flow.deinit();
+		        })
+		        .status() == FlowStatus::Ok
+		);
+
+		assert(flow.setState(State::Ready) == FlowStatus::NotInitialized);
+		assert(!flow.initialized());
+	}
+
+	{
+		Flow<State> flow;
+		FlowConfig config;
+		config.maxStates = 2;
+		config.maxTransitions = 1;
+		assert(flow.init(config, State::Idle));
+		assert(flow.transition(State::Idle, State::Ready).status() == FlowStatus::Ok);
+		assert(
+		    flow.onEnter(State::Ready, [&flow]() {
+			    flow.deinit();
+		    }) == FlowStatus::Ok
+		);
+
+		assert(flow.setState(State::Ready) == FlowStatus::Changed);
+		assert(!flow.initialized());
+	}
+}
+
 static void testLimitsAndCallbackSize() {
 	Flow<State, 8> flow;
 	FlowConfig config;
@@ -189,6 +263,113 @@ static void testLimitsAndCallbackSize() {
 	assert(callbackFlow.transition(State::Idle, State::Ready).status() == FlowStatus::Ok);
 	assert(callbackFlow.onEnter(State::Ready, LargeCallable{}) == FlowStatus::CallbackTooLarge);
 	assert(callbackFlow.getDiagnostics().callbackTooLargeCount == 1);
+	assert(
+	    std::strcmp(callbackFlow.statusToString(FlowStatus::MaxCallbacksReached), "MaxCallbacksReached") ==
+	    0
+	);
+}
+
+static void testTransactionalTransitionPath() {
+	{
+		Flow<State> flow;
+		FlowConfig config;
+		config.maxStates = 4;
+		config.maxTransitions = 2;
+		assert(flow.init(config, State::Idle));
+
+		assert(
+		    flow.transitionPath({State::Idle, State::Starting, State::Ready, State::Failed}) ==
+		    FlowStatus::MaxTransitionsReached
+		);
+		assert(flow.setState(State::Starting) == FlowStatus::NoTransition);
+		assert(flow.getDiagnostics().transitionCount == 0);
+	}
+
+	{
+		Flow<State> flow;
+		FlowConfig config;
+		config.maxStates = 3;
+		config.maxTransitions = 3;
+		assert(flow.init(config, State::Idle));
+
+		assert(
+		    flow.transitionPath({State::Idle, State::Starting, State::Idle, State::Ready}) ==
+		    FlowStatus::Ok
+		);
+		assert(flow.getDiagnostics().transitionCount == 3);
+		assert(flow.setState(State::Starting) == FlowStatus::Changed);
+		assert(flow.setState(State::Idle) == FlowStatus::Changed);
+		assert(flow.setState(State::Ready) == FlowStatus::Changed);
+	}
+
+	{
+		Flow<State> flow;
+		FlowConfig config;
+		config.maxStates = 3;
+		config.maxTransitions = 3;
+		assert(flow.init(config, State::Idle));
+
+		assert(
+		    flow.transitionPath({State::Idle, State::Starting, State::Idle, State::Starting}) ==
+		    FlowStatus::DuplicateTransition
+		);
+		assert(flow.getDiagnostics().transitionCount == 0);
+		assert(flow.setState(State::Starting) == FlowStatus::NoTransition);
+	}
+
+	{
+		Flow<State> flow;
+		FlowConfig config;
+		config.maxStates = 1;
+		config.maxTransitions = 1;
+		assert(flow.init(config, State::Idle));
+
+		assert(flow.transitionPath({State::Starting, State::Idle}) == FlowStatus::MaxStatesReached);
+		assert(flow.getDiagnostics().transitionCount == 0);
+		assert(flow.setState(State::Starting) == FlowStatus::NoTransition);
+	}
+}
+
+static void testUndefinedTransitionsRegisterTargetStates() {
+	{
+		Flow<State> flow;
+		FlowConfig config;
+		config.maxStates = 2;
+		config.maxTransitions = 1;
+		config.allowUndefinedTransitions = true;
+		assert(flow.init(config, State::Idle));
+
+		assert(flow.setState(State::Ready) == FlowStatus::Changed);
+		assert(flow.onEnter(State::Extra, []() {}) == FlowStatus::MaxStatesReached);
+	}
+
+	{
+		Flow<State> flow;
+		FlowConfig config;
+		config.maxStates = 1;
+		config.maxTransitions = 1;
+		config.allowUndefinedTransitions = true;
+		assert(flow.init(config, State::Idle));
+
+		assert(flow.setState(State::Ready) == FlowStatus::MaxStatesReached);
+		FlowDiag<State> diag = flow.getDiagnostics();
+		assert(diag.failedCount == 1);
+		assert(diag.lastStatus == FlowStatus::MaxStatesReached);
+		assert(flow.current() == State::Idle);
+	}
+}
+
+static void testAllowSameState() {
+	Flow<State> flow;
+	FlowConfig config;
+	config.maxStates = 1;
+	config.maxTransitions = 1;
+	config.allowSameState = true;
+	assert(flow.init(config, State::Idle));
+	assert(flow.transition(State::Idle, State::Idle).status() == FlowStatus::Ok);
+
+	assert(flow.setState(State::Idle) == FlowStatus::Changed);
+	assert(flow.current() == State::Idle);
 }
 
 static void testReentrantBusy() {
@@ -247,7 +428,12 @@ int main() {
 	testInvalidConfig();
 	testTransitionsAndDiagnostics();
 	testGuardsAndCallbacks();
+	testGuardDeinitReturningTrue();
+	testExitActionAndEnterDeinitBehavior();
 	testLimitsAndCallbackSize();
+	testTransactionalTransitionPath();
+	testUndefinedTransitionsRegisterTargetStates();
+	testAllowSameState();
 	testReentrantBusy();
 	testNoAllocationDuringSetState();
 	testThreadSafePathCompiles();

@@ -55,3 +55,7 @@ Busy
 Calling `init()` twice returns `AlreadyInitialized`. Calling `deinit()` before init returns `Ok`.
 
 `transition()` returns a temporary builder. If transition creation fails, later `guard()` and `action()` calls are no-ops and preserve the original failure status.
+
+`transitionPath()` is transactional. If any transition in the path cannot be registered, no transitions from that call are added.
+
+`MaxCallbacksReached` is reserved for future multi-callback support and is not emitted by v0.0.1 production code.

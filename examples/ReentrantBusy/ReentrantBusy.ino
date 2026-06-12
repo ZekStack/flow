@@ -10,6 +10,14 @@ enum class State : uint8_t {
 Flow<State> flow;
 FlowStatus nestedStatus = FlowStatus::Ok;
 
+bool checkStatus(FlowStatus status) {
+	if (status == FlowStatus::Ok) {
+		return true;
+	}
+	Serial.println(flow.statusToString(status));
+	return false;
+}
+
 void setup() {
 	Serial.begin(115200);
 
@@ -17,12 +25,24 @@ void setup() {
 	config.maxStates = 3;
 	config.maxTransitions = 2;
 
-	flow.init(config, State::Idle);
-	flow.transition(State::Idle, State::Starting);
-	flow.transition(State::Starting, State::Ready);
-	flow.onEnter(State::Starting, []() {
-		nestedStatus = flow.setState(State::Ready);
-	});
+	FlowResult result = flow.init(config, State::Idle);
+	if (!result) {
+		Serial.println(result.message);
+		return;
+	}
+	if (!checkStatus(flow.transition(State::Idle, State::Starting).status())) {
+		return;
+	}
+	if (!checkStatus(flow.transition(State::Starting, State::Ready).status())) {
+		return;
+	}
+	if (!checkStatus(
+	        flow.onEnter(State::Starting, []() {
+		        nestedStatus = flow.setState(State::Ready);
+	        })
+	    )) {
+		return;
+	}
 
 	flow.setState(State::Starting);
 	Serial.println(flow.statusToString(nestedStatus));

@@ -21,23 +21,47 @@ class StorageFeature {
 			return result;
 		}
 
-		_flow.transition(StorageState::Idle, StorageState::Mounting)
-		    .action([this]() {
-			    mount();
-		    });
-		_flow.transition(StorageState::Mounting, StorageState::Ready)
-		    .guard([this]() {
-			    return _mounted;
-		    });
-		_flow.transition(StorageState::Mounting, StorageState::Failed);
-		_flow.transition(StorageState::Failed, StorageState::Mounting);
+		FlowStatus status = _flow.transition(StorageState::Idle, StorageState::Mounting)
+		                        .action([this]() {
+			                        mount();
+		                        })
+		                        .status();
+		if (status != FlowStatus::Ok) {
+			return FlowResult::error(status, _flow.statusToString(status));
+		}
 
-		_flow.onEnter(StorageState::Ready, [this]() {
+		status = _flow.transition(StorageState::Mounting, StorageState::Ready)
+		             .guard([this]() {
+			             return _mounted;
+		             })
+		             .status();
+		if (status != FlowStatus::Ok) {
+			return FlowResult::error(status, _flow.statusToString(status));
+		}
+
+		status = _flow.transition(StorageState::Mounting, StorageState::Failed).status();
+		if (status != FlowStatus::Ok) {
+			return FlowResult::error(status, _flow.statusToString(status));
+		}
+
+		status = _flow.transition(StorageState::Failed, StorageState::Mounting).status();
+		if (status != FlowStatus::Ok) {
+			return FlowResult::error(status, _flow.statusToString(status));
+		}
+
+		status = _flow.onEnter(StorageState::Ready, [this]() {
 			onReady();
 		});
-		_flow.onEnter(StorageState::Failed, [this]() {
+		if (status != FlowStatus::Ok) {
+			return FlowResult::error(status, _flow.statusToString(status));
+		}
+
+		status = _flow.onEnter(StorageState::Failed, [this]() {
 			onFailed();
 		});
+		if (status != FlowStatus::Ok) {
+			return FlowResult::error(status, _flow.statusToString(status));
+		}
 
 		return FlowResult::ok();
 	}
@@ -76,7 +100,11 @@ StorageFeature storage;
 
 void setup() {
 	Serial.begin(115200);
-	storage.init();
+	FlowResult result = storage.init();
+	if (!result) {
+		Serial.println(result.message);
+		return;
+	}
 	storage.start();
 	storage.handleMounted();
 }

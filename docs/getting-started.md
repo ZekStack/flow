@@ -27,7 +27,12 @@ if (!result) {
 	return;
 }
 
-flow.transitionPath({State::Idle, State::Starting, State::Ready});
+FlowStatus status = flow.transitionPath({State::Idle, State::Starting, State::Ready});
+if (status != FlowStatus::Ok) {
+	Serial.println(flow.statusToString(status));
+	return;
+}
+
 flow.setState(State::Starting);
 flow.setState(State::Ready);
 ```

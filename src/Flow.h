@@ -123,6 +123,9 @@ template <typename State, size_t CallbackSize> class FlowTransitionBuilder {
 };
 
 template <typename State, size_t CallbackSize> class Flow {
+	static_assert(CallbackSize > 0, "CallbackSize must be greater than zero");
+	static_assert(std::is_copy_constructible_v<State>, "State must be copy constructible");
+
   public:
 	using Callback = FlowFixedFunction<void(), CallbackSize>;
 	using GuardCallback = FlowFixedFunction<bool(), CallbackSize>;
@@ -234,9 +237,11 @@ template <typename State, size_t CallbackSize> class Flow {
 
 	FlowStatus setState(State state) {
 		State from{};
+		GuardCallback guardCallback;
 		Callback exitCallback;
 		Callback actionCallback;
 		Callback enterCallback;
+		bool hasGuard = false;
 		bool hasExit = false;
 		bool hasAction = false;
 		bool hasEnter = false;
@@ -272,17 +277,22 @@ template <typename State, size_t CallbackSize> class Flow {
 			if (transition == nullptr && !_config.allowUndefinedTransitions) {
 				return recordFailureLocked(FlowStatus::NoTransition);
 			}
+			if (transition == nullptr && _config.allowUndefinedTransitions) {
+				const FlowStatus status = ensureState(state);
+				if (status != FlowStatus::Ok) {
+					return recordFailureLocked(status);
+				}
+			}
 
 			_busy = true;
-
-			if (transition != nullptr && transition->hasGuard && !transition->guard()) {
-				_busy = false;
-				return recordFailureLocked(FlowStatus::GuardRejected);
-			}
 
 			_previous = from;
 			StateEntry *fromEntry = findState(from);
 			StateEntry *toEntry = findState(state);
+			if (transition != nullptr && transition->hasGuard) {
+				guardCallback = transition->guard;
+				hasGuard = true;
+			}
 			if (fromEntry != nullptr && fromEntry->hasOnExit) {
 				exitCallback = fromEntry->onExit;
 				hasExit = true;
@@ -297,6 +307,25 @@ template <typename State, size_t CallbackSize> class Flow {
 			}
 		}
 
+		bool guardAccepted = true;
+		if (hasGuard) {
+			guardAccepted = guardCallback();
+		}
+
+		{
+			FlowLock lock(_mutex, _config.threadSafe);
+			if (!lock) {
+				return FlowStatus::Busy;
+			}
+			if (!_initialized || !_busy) {
+				return FlowStatus::NotInitialized;
+			}
+			if (!guardAccepted) {
+				_busy = false;
+				return recordFailureLocked(FlowStatus::GuardRejected);
+			}
+		}
+
 		if (hasExit) {
 			exitCallback();
 		}
@@ -308,6 +337,9 @@ template <typename State, size_t CallbackSize> class Flow {
 			FlowLock lock(_mutex, _config.threadSafe);
 			if (!lock) {
 				return FlowStatus::Busy;
+			}
+			if (!_initialized || !_busy) {
+				return FlowStatus::NotInitialized;
 			}
 			_current = state;
 			_diag.currentState = state;
@@ -325,6 +357,9 @@ template <typename State, size_t CallbackSize> class Flow {
 			FlowLock lock(_mutex, _config.threadSafe);
 			if (!lock) {
 				return FlowStatus::Busy;
+			}
+			if (!_initialized) {
+				return FlowStatus::Changed;
 			}
 			_busy = false;
 		}
@@ -366,6 +401,10 @@ template <typename State, size_t CallbackSize> class Flow {
 	}
 
 	FlowStatus transitionPath(std::initializer_list<State> states) {
+		FlowLock lock(_mutex, _config.threadSafe);
+		if (!lock) {
+			return FlowStatus::Busy;
+		}
 		if (!_initialized) {
 			return FlowStatus::NotInitialized;
 		}
@@ -373,17 +412,51 @@ template <typename State, size_t CallbackSize> class Flow {
 			return FlowStatus::Ok;
 		}
 
+		const size_t transitionsToAdd = states.size() - 1;
+		const size_t availableTransitions = _config.maxTransitions - _transitionCount;
+		if (transitionsToAdd > availableTransitions) {
+			return FlowStatus::MaxTransitionsReached;
+		}
+
+		const size_t availableStates = _config.maxStates - _stateCount;
+		size_t newStateCount = 0;
 		auto iterator = states.begin();
 		State previous = *iterator;
+		if (!stateExistsInPathPrefixOrFlow(previous, states.begin(), iterator)) {
+			newStateCount++;
+			if (newStateCount > availableStates) {
+				return FlowStatus::MaxStatesReached;
+			}
+		}
 		++iterator;
 		for (; iterator != states.end(); ++iterator) {
-			Builder builder = transition(previous, *iterator);
-			const FlowStatus status = builder.status();
-			if (status != FlowStatus::Ok) {
-				return status;
+			if (findTransition(previous, *iterator) != nullptr ||
+			    transitionExistsInPathPrefix(previous, *iterator, states.begin(), iterator)) {
+				return FlowStatus::DuplicateTransition;
+			}
+			if (!stateExistsInPathPrefixOrFlow(*iterator, states.begin(), iterator)) {
+				newStateCount++;
+				if (newStateCount > availableStates) {
+					return FlowStatus::MaxStatesReached;
+				}
 			}
 			previous = *iterator;
 		}
+
+		iterator = states.begin();
+		previous = *iterator;
+		ensureState(previous);
+		++iterator;
+		for (; iterator != states.end(); ++iterator) {
+			ensureState(*iterator);
+			const uint16_t index = _transitionCount++;
+			_transitions[index].from = previous;
+			_transitions[index].to = *iterator;
+			_transitions[index].hasGuard = false;
+			_transitions[index].hasAction = false;
+			previous = *iterator;
+		}
+		_diag.transitionCount = _transitionCount;
 		return FlowStatus::Ok;
 	}
 
@@ -571,6 +644,43 @@ template <typename State, size_t CallbackSize> class Flow {
 			}
 		}
 		return nullptr;
+	}
+
+	bool stateExistsInPathPrefixOrFlow(
+	    State state,
+	    const State *begin,
+	    const State *current
+	) const {
+		if (findState(state) != nullptr) {
+			return true;
+		}
+		for (const State *iterator = begin; iterator != current; ++iterator) {
+			if (*iterator == state) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool transitionExistsInPathPrefix(
+	    State from,
+	    State to,
+	    const State *begin,
+	    const State *current
+	) const {
+		if (begin == current) {
+			return false;
+		}
+		const State *previous = begin;
+		const State *iterator = begin;
+		++iterator;
+		for (; iterator != current; ++iterator) {
+			if (*previous == from && *iterator == to) {
+				return true;
+			}
+			previous = iterator;
+		}
+		return false;
 	}
 
 	FlowStatus ensureState(State state) {

@@ -22,3 +22,7 @@ flow.onEnter(State::Ready, [this]() {
 One `onEnter` and one `onExit` callback are supported per state in v0.0.1. Registering the same slot twice returns `FlowStatus::CallbackAlreadyRegistered`.
 
 `std::function` is not used for production callback storage. `std::bind` may work when the generated callable fits into `CallbackSize`, but it is not the preferred style.
+
+Callbacks should not call `deinit()`, `init()`, `transition()`, `transitionPath()`, `onEnter()`, or `onExit()` on the same Flow instance during `setState()`.
+
+If a guard, exit callback, or action deinitializes Flow before the state commit, `setState()` returns `FlowStatus::NotInitialized`. If `onEnter` deinitializes Flow after the state commit, `setState()` returns `FlowStatus::Changed`.

@@ -2,7 +2,7 @@
 
 Flow is a finite state machine library for ESP32.
 
-Flow helps features manage internal state in Arduino ESP32 projects with explicit transitions, guards, actions, enter callbacks, exit callbacks, optional FreeRTOS mutex protection, and diagnostics. It is designed for feature-owned state machines with predictable setup and no allocation during state changes.
+Flow helps features manage internal state in Arduino ESP32 projects with explicit transitions, guards, actions, enter callbacks, exit callbacks, optional FreeRTOS mutex protection, and diagnostics. It is designed for feature-owned state machines with predictable setup and no Flow heap allocation during state changes.
 
 [![CI](https://github.com/ZekStack/flow/actions/workflows/ci.yml/badge.svg)](https://github.com/ZekStack/flow/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/ZekStack/flow?sort=semver)](https://github.com/ZekStack/flow/releases)
@@ -13,7 +13,7 @@ Flow helps features manage internal state in Arduino ESP32 projects with explici
 * **Explicit state rules** - only registered transitions are allowed by default.
 * **Feature-owned** - each feature can keep its own small state machine.
 * **Fixed callback storage** - capturing lambdas are stored inline with a configurable size.
-* **Predictable runtime** - `setState()` does not allocate.
+* **Predictable runtime** - Flow performs no heap allocation in `setState()`.
 * **Production-minded** - result-based errors, diagnostics, optional thread safety, and no exceptions.
 
 ## Install
@@ -73,16 +73,29 @@ void setup() {
 		return;
 	}
 
-	flow.transitionPath({
+	FlowStatus status = flow.transitionPath({
 	    FeatureState::Idle,
 	    FeatureState::Starting,
 	    FeatureState::Ready,
 	});
-	flow.transition(FeatureState::Starting, FeatureState::Failed);
+	if (status != FlowStatus::Ok) {
+		Serial.println(flow.statusToString(status));
+		return;
+	}
 
-	flow.onEnter(FeatureState::Ready, []() {
+	status = flow.transition(FeatureState::Starting, FeatureState::Failed).status();
+	if (status != FlowStatus::Ok) {
+		Serial.println(flow.statusToString(status));
+		return;
+	}
+
+	status = flow.onEnter(FeatureState::Ready, []() {
 		Serial.println("ready");
 	});
+	if (status != FlowStatus::Ok) {
+		Serial.println(flow.statusToString(status));
+		return;
+	}
 
 	flow.setState(FeatureState::Starting);
 	flow.setState(FeatureState::Ready);
@@ -96,7 +109,7 @@ void loop() {
 ## Important notes
 
 > [!IMPORTANT]
-> Register transitions and callbacks during setup, after `init()` and before runtime state changes. `setState()` does not allocate and user callbacks run without the internal mutex held.
+> Register transitions and callbacks during setup, after `init()` and before runtime state changes. Flow performs no heap allocation in `setState()`, and user callbacks run without the internal mutex held.
 
 * Flow is for internal feature state.
 * Phase is for async application lifecycle orchestration.
@@ -105,6 +118,9 @@ void loop() {
 * One `onEnter` and one `onExit` callback are supported per state in v0.0.1.
 * `std::function` is not used for production callback storage.
 * Capturing lambdas are the recommended callback style. `std::bind` may work only when the generated callable fits into `CallbackSize`.
+* User callable copy constructors should avoid heap allocation.
+* Callbacks should not call `deinit()`, `init()`, `transition()`, `transitionPath()`, `onEnter()`, or `onExit()` on the same Flow instance during `setState()`.
+* If a guard, exit callback, or action deinitializes Flow before the state commit, `setState()` returns `NotInitialized`. If `onEnter` deinitializes Flow after the commit, `setState()` returns `Changed`.
 
 ## Examples
 

@@ -9,14 +9,28 @@ enum class State : uint8_t {
 
 Flow<State> flow;
 
+bool checkStatus(FlowStatus status) {
+	if (status == FlowStatus::Ok) {
+		return true;
+	}
+	Serial.println(flow.statusToString(status));
+	return false;
+}
+
 void setup() {
 	Serial.begin(115200);
 
 	FlowConfig config;
 	config.maxStates = 3;
 	config.maxTransitions = 2;
-	flow.init(config, State::Idle);
-	flow.transitionPath({State::Idle, State::Starting, State::Ready});
+	FlowResult result = flow.init(config, State::Idle);
+	if (!result) {
+		Serial.println(result.message);
+		return;
+	}
+	if (!checkStatus(flow.transitionPath({State::Idle, State::Starting, State::Ready}))) {
+		return;
+	}
 
 	flow.setState(State::Starting);
 	flow.setState(State::Ready);

@@ -24,7 +24,11 @@ void setup() {
 	config.maxStates = 2;
 	config.maxTransitions = 1;
 
-	flow.init(config, State::Idle);
+	FlowResult result = flow.init(config, State::Idle);
+	if (!result) {
+		Serial.println(result.message);
+		return;
+	}
 
 	Serial.println(flow.statusToString(flow.transition(State::Idle, State::Starting).status()));
 	Serial.println(flow.statusToString(flow.transition(State::Idle, State::Starting).status()));

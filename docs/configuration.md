@@ -15,6 +15,8 @@ struct FlowConfig {
 
 Flow allocates bounded state and transition storage during `init()` only. If allocation fails, `init()` returns `FlowStatus::AllocationFailed`.
 
-No heap allocation is performed by `setState()`, guards, actions, `onEnter()`, or `onExit()`.
+Flow performs no heap allocation during `setState()`. User callable copy constructors should also avoid heap allocation.
 
 When `threadSafe` is enabled, Flow protects public state access with a FreeRTOS recursive mutex. User callbacks run without the mutex held.
+
+When `allowUndefinedTransitions` is enabled, accepted target states are registered in Flow's internal state table before the state changes.

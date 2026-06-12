@@ -17,6 +17,14 @@ struct ReadyPrinter {
 Flow<State> flow;
 uint32_t readyCount = 0;
 
+bool checkStatus(FlowStatus status) {
+	if (status == FlowStatus::Ok) {
+		return true;
+	}
+	Serial.println(flow.statusToString(status));
+	return false;
+}
+
 void setup() {
 	Serial.begin(115200);
 
@@ -24,12 +32,23 @@ void setup() {
 	config.maxStates = 2;
 	config.maxTransitions = 1;
 
-	flow.init(config, State::Idle);
-	flow.transition(State::Idle, State::Ready)
-	    .action([]() {
-		    readyCount++;
-	    });
-	flow.onEnter(State::Ready, ReadyPrinter{"small callable object"});
+	FlowResult result = flow.init(config, State::Idle);
+	if (!result) {
+		Serial.println(result.message);
+		return;
+	}
+	if (!checkStatus(
+	        flow.transition(State::Idle, State::Ready)
+	            .action([]() {
+		            readyCount++;
+	            })
+	            .status()
+	    )) {
+		return;
+	}
+	if (!checkStatus(flow.onEnter(State::Ready, ReadyPrinter{"small callable object"}))) {
+		return;
+	}
 
 	flow.setState(State::Ready);
 	Serial.println(readyCount);
