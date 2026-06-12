@@ -1,0 +1,33 @@
+{
+  "name": "Flow",
+  "version": "0.0.1",
+  "description": "Finite state machine library for ESP32 feature state.",
+  "keywords": [
+    "esp32",
+    "freertos",
+    "state-machine",
+    "fsm",
+    "states",
+    "flow"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZekStack/flow.git"
+  },
+  "authors": [
+    {
+      "name": "zekageri",
+      "maintainer": true
+    }
+  ],
+  "license": "MIT",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src",
+    "flags": [
+      "-std=gnu++20"
+    ]
+  }
+}
