@@ -14,27 +14,42 @@ enum class State : uint8_t {
 Flow<State> flow;
 ```
 
-Initialize with bounded capacities, register transitions, then request state changes.
+Initialize fixed capacities and the initial state:
 
 ```cpp
 FlowConfig config;
 config.maxStates = 3;
 config.maxTransitions = 2;
+config.threadSafe = true;
 
 FlowResult result = flow.init(config, State::Idle);
 if (!result) {
 	Serial.println(result.message);
 	return;
 }
+```
 
+Register transitions and callbacks during setup:
+
+```cpp
 FlowStatus status = flow.transitionPath({State::Idle, State::Starting, State::Ready});
 if (status != FlowStatus::Ok) {
 	Serial.println(flow.statusToString(status));
 	return;
 }
 
-flow.setState(State::Starting);
+status = flow.onEnter(State::Ready, []() {
+	Serial.println("ready");
+});
+```
+
+Runtime state changes use `setState()`:
+
+```cpp
+if (flow.setState(State::Starting) != FlowStatus::Changed) {
+	return;
+}
 flow.setState(State::Ready);
 ```
 
-Register transitions and callbacks during setup. Runtime state changes should call `setState()` only.
+Do not mutate or deinitialize the same Flow instance from one of its callbacks. Such calls return `Busy`; defer them through the application event system.

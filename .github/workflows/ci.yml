@@ -29,7 +29,7 @@ jobs:
             echo "Embedded safety audit failed"
             exit 1
           fi
-          if grep -RInE '#include[[:space:]]+[<"](Fresh|Pulse|Signal|Tempo|Trace|Worker|Vault|Link|Courier|Phase|Lingo)\\.h[>"]' src; then
+          if grep -RInE '#include[[:space:]]+[<"](Fresh|Pulse|Signal|Tempo|Trace|Worker|Vault|Link|Courier|Phase|Lingo)\.h[>"]' src; then
             echo "Embedded safety audit failed: Flow must not depend on other ZekStack libraries"
             exit 1
           fi
@@ -43,13 +43,65 @@ jobs:
 
       - name: Build and run host logic tests
         run: |
-          g++ -std=c++20 -Wall -Wextra -pedantic \
+          g++ -std=c++20 -Wall -Wextra -Werror -pedantic -pthread \
             -Itests/host/stubs \
             -Isrc \
             src/Flow.cpp \
             tests/host/test_flow.cpp \
             -o /tmp/flow-host-tests
           /tmp/flow-host-tests
+
+  host-sanitizers:
+    runs-on: ubuntu-latest
+    needs: source-audit
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and run ASan and UBSan tests
+        run: |
+          g++ -std=c++20 -Wall -Wextra -Werror -pedantic -pthread \
+            -fsanitize=address,undefined \
+            -fno-omit-frame-pointer \
+            -Itests/host/stubs \
+            -Isrc \
+            src/Flow.cpp \
+            tests/host/test_flow.cpp \
+            -o /tmp/flow-host-sanitizers
+          ASAN_OPTIONS=detect_leaks=1 /tmp/flow-host-sanitizers
+
+  host-thread-sanitizer:
+    runs-on: ubuntu-latest
+    needs: source-audit
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and run ThreadSanitizer tests
+        run: |
+          g++ -std=c++20 -Wall -Wextra -Werror -pedantic -pthread \
+            -fsanitize=thread \
+            -fno-omit-frame-pointer \
+            -Itests/host/stubs \
+            -Isrc \
+            src/Flow.cpp \
+            tests/host/test_flow.cpp \
+            -o /tmp/flow-host-tsan
+          TSAN_OPTIONS=halt_on_error=1 /tmp/flow-host-tsan
+
+  release-metadata:
+    runs-on: ubuntu-latest
+    needs: source-audit
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test release version validation
+        run: python3 -m unittest tests/host/test_release_version.py
+
+      - name: Validate tag against manifests
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python3 scripts/check_release_version.py "${GITHUB_REF_NAME}"
 
   build-examples:
     runs-on: ubuntu-latest
@@ -97,42 +149,6 @@ jobs:
                 --project-option "build_flags=-std=gnu++20"
             fi
           done
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [source-audit, host-logic-tests, build-examples, arduino-cli]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Generate release changelog
-        run: |
-          python3 scripts/generate_release_changelog.py \
-            --target-ref "${GITHUB_REF_NAME}" \
-            --tag-name "${GITHUB_REF_NAME}" \
-            --output "release-changelog.md"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          target_commitish: ${{ github.sha }}
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: false
-          body_path: release-changelog.md
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   arduino-cli:
     runs-on: ubuntu-latest
@@ -194,3 +210,46 @@ jobs:
                 "$d"
             fi
           done
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - source-audit
+      - host-logic-tests
+      - host-sanitizers
+      - host-thread-sanitizer
+      - release-metadata
+      - build-examples
+      - arduino-cli
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate release changelog
+        run: |
+          python3 scripts/generate_release_changelog.py \
+            --target-ref "${GITHUB_REF_NAME}" \
+            --tag-name "${GITHUB_REF_NAME}" \
+            --output "release-changelog.md"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: false
+          body_path: release-changelog.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
