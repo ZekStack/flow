@@ -46,6 +46,14 @@ class FlowFixedFunction<ReturnType(Args...), StorageSize> {
 		    std::is_invocable_r_v<ReturnType, CallableType &, Args...>,
 		    "Flow callback signature does not match"
 		);
+		static_assert(
+		    std::is_copy_constructible_v<CallableType>,
+		    "Flow callbacks must be copy constructible"
+		);
+		static_assert(
+		    std::is_move_constructible_v<CallableType>,
+		    "Flow callbacks must be move constructible"
+		);
 
 		if constexpr (
 		    sizeof(CallableType) > StorageSize ||
@@ -56,7 +64,9 @@ class FlowFixedFunction<ReturnType(Args...), StorageSize> {
 			reset();
 			new (&_storage) CallableType(std::move(callable));
 			_invoke = [](void *storage, Args... args) -> ReturnType {
-				return (*reinterpret_cast<CallableType *>(storage))(std::forward<Args>(args)...);
+				return (*reinterpret_cast<CallableType *>(storage))(
+				    std::forward<Args>(args)...
+				);
 			};
 			_copy = [](void *destination, const void *source) {
 				new (destination) CallableType(*reinterpret_cast<const CallableType *>(source));
@@ -87,7 +97,10 @@ class FlowFixedFunction<ReturnType(Args...), StorageSize> {
 
 	ReturnType operator()(Args... args) const {
 		if constexpr (std::is_void_v<ReturnType>) {
-			_invoke(const_cast<void *>(static_cast<const void *>(&_storage)), std::forward<Args>(args)...);
+			_invoke(
+			    const_cast<void *>(static_cast<const void *>(&_storage)),
+			    std::forward<Args>(args)...
+			);
 		} else {
 			return _invoke(
 			    const_cast<void *>(static_cast<const void *>(&_storage)),
