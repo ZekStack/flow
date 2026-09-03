@@ -18,7 +18,7 @@ env:
 
 jobs:
   source-audit:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, zekstack-ci]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,7 +35,7 @@ jobs:
           fi
 
   host-logic-tests:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, zekstack-ci]
     needs: source-audit
     steps:
       - name: Checkout
@@ -52,7 +52,7 @@ jobs:
           /tmp/flow-host-tests
 
   host-sanitizers:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, zekstack-ci]
     needs: source-audit
     steps:
       - name: Checkout
@@ -71,7 +71,7 @@ jobs:
           ASAN_OPTIONS=detect_leaks=1 /tmp/flow-host-sanitizers
 
   host-thread-sanitizer:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, zekstack-ci]
     needs: source-audit
     steps:
       - name: Checkout
@@ -90,7 +90,7 @@ jobs:
           TSAN_OPTIONS=halt_on_error=1 /tmp/flow-host-tsan
 
   release-metadata:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, zekstack-ci]
     needs: source-audit
     steps:
       - name: Checkout
@@ -104,7 +104,7 @@ jobs:
         run: python3 scripts/check_release_version.py "${GITHUB_REF_NAME}"
 
   build-examples:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, zekstack-ci]
     needs: [source-audit, host-logic-tests]
     strategy:
       fail-fast: false
@@ -151,7 +151,7 @@ jobs:
           done
 
   arduino-cli:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, zekstack-ci]
     needs: [source-audit, host-logic-tests]
     strategy:
       fail-fast: false
@@ -221,7 +221,7 @@ jobs:
       - release-metadata
       - build-examples
       - arduino-cli
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, zekstack-ci]
     permissions:
       contents: write
     steps:
