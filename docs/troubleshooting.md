@@ -25,3 +25,14 @@ Increase `FlowConfig::maxStates`. The initial state, transitions, callback regis
 ## `MaxTransitionsReached`
 
 Increase `FlowConfig::maxTransitions`, or reduce the number of registered transition pairs.
+
+
+## `AllocationFailed`
+
+Flow could not create its optional mutex or allocate the bounded state/transition tables. With `memory.allocation = Strata::Placement::RequireExternal`, this is the expected result when external memory is unavailable.
+
+Use `Default`, `Internal`, or `PreferExternal` when fallback is acceptable. Check `FlowDiag::allocationPlacement` together with the observed storage regions when diagnosing placement behavior.
+
+## Requested placement differs from observed region
+
+This is expected with `Strata::Placement::PreferExternal`: Strata may fall back to internal memory. The requested placement remains `PreferExternal` while the observed state/transition region reports where the storage actually resides.

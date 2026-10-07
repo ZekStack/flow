@@ -4,6 +4,10 @@
 
 ```cpp
 struct FlowConfig {
+	Strata::MemoryPolicy memory{
+	    .allocation = Strata::Placement::Default,
+	    .taskStack = Strata::Placement::Internal,
+	};
 	uint16_t maxStates = 8;
 	uint16_t maxTransitions = 16;
 	bool threadSafe = false;
@@ -11,6 +15,16 @@ struct FlowConfig {
 	bool allowUndefinedTransitions = false;
 };
 ```
+
+## `memory`
+
+Flow uses the ecosystem-wide `Strata::MemoryPolicy`.
+
+`memory.allocation` controls the bounded state and transition tables allocated during `init()`. The default is `Strata::Placement::Default`, preserving Flow's previous backend-default behavior. `PreferExternal` may fall back to internal memory, while `RequireExternal` makes unavailable external memory an initialization failure.
+
+Flow does not own tasks. `memory.taskStack` is retained for the common ZekStack configuration shape and is validated, but it currently has no runtime effect.
+
+The optional recursive mutex is a control structure and always remains internal through Strata regardless of `memory.allocation`.
 
 ## `maxStates`
 
@@ -42,6 +56,8 @@ When enabled, an unregistered target may be accepted and is added to the interna
 
 ## Allocation behavior
 
-Flow allocates bounded state and transition arrays during `init()`. Thread-safe mode also creates one FreeRTOS mutex.
+Flow allocates bounded state and transition arrays through Strata during `init()`. Thread-safe mode also creates one Strata-owned FreeRTOS recursive mutex whose control block remains internal.
 
-Flow itself performs no heap allocation during `setState()`. Callback snapshots use fixed inline storage. User callback copy constructors must also avoid heap allocation when strict allocation-free state changes are required.
+Diagnostics keep the requested `Strata::Placement` separate from the observed `Strata::Region`, so a `PreferExternal` request that falls back to internal RAM remains visible as such.
+
+Flow itself performs no heap or Strata allocation during `setState()`. Callback snapshots use fixed inline storage. User callback copy constructors must also avoid heap allocation when strict allocation-free state changes are required.
