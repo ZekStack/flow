@@ -21,6 +21,7 @@ FlowConfig config;
 config.maxStates = 3;
 config.maxTransitions = 2;
 config.threadSafe = true;
+config.memory.allocation = Strata::Placement::PreferExternal;
 
 FlowResult result = flow.init(config, State::Idle);
 if (!result) {
@@ -53,3 +54,10 @@ flow.setState(State::Ready);
 ```
 
 Do not mutate or deinitialize the same Flow instance from one of its callbacks. Such calls return `Busy`; defer them through the application event system.
+
+
+## Memory placement
+
+Flow `v0.2.0` uses Strata `v0.1.4`. Use `config.memory.allocation` to select the placement of Flow's bounded state and transition storage. Leave it at `Default` to preserve backend-default behavior, use `PreferExternal` when internal fallback is acceptable, or use `RequireExternal` when initialization must fail without external memory.
+
+Flow owns no task stack. Thread-safe mutex control storage remains internal automatically.

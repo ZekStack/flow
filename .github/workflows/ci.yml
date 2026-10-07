@@ -19,6 +19,7 @@ env:
   PIOARDUINO_PLATFORM_URL: https://github.com/pioarduino/platform-espressif32/releases/download/55.03.39/platform-espressif32.zip
   PIOARDUINO_PLATFORM_VERSION: 55.03.39
   PIOARDUINO_VERSION: 6.1.19
+  STRATA_VERSION: v0.1.4
 
 jobs:
   source-audit:
@@ -37,6 +38,7 @@ jobs:
             echo "Embedded safety audit failed: Flow must not depend on other ZekStack libraries"
             exit 1
           fi
+          python3 scripts/check_strata_contract.py
 
   host-logic-tests:
     runs-on: [self-hosted, zekstack-ci]
@@ -45,15 +47,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Fetch Strata
+        run: |
+          rm -rf "${RUNNER_TEMP}/flow-strata"
+          git clone --depth 1 --branch "${STRATA_VERSION}" \
+            https://github.com/ZekStack/strata.git \
+            "${RUNNER_TEMP}/flow-strata"
+
       - name: Build and run host logic tests
         run: |
+          STRATA_DIR="${RUNNER_TEMP}/flow-strata"
+          COMMON_STRATA_SOURCES="${STRATA_DIR}/src/strata/Allocation.cpp ${STRATA_DIR}/src/strata/Diagnostics.cpp ${STRATA_DIR}/src/strata/internal/PlatformGeneric.cpp"
+
           g++ -std=c++20 -Wall -Wextra -Werror -pedantic -pthread \
             -Itests/host/stubs \
             -Isrc \
+            -I"${STRATA_DIR}/src" \
             src/Flow.cpp \
             tests/host/test_flow.cpp \
+            ${COMMON_STRATA_SOURCES} \
             -o /tmp/flow-host-tests
           /tmp/flow-host-tests
+
+          g++ -std=c++20 -Wall -Wextra -Werror -pedantic -pthread \
+            -DSTRATA_ENABLE_ADVANCED_DIAGNOSTICS=1 \
+            -Itests/host/stubs \
+            -Isrc \
+            -I"${STRATA_DIR}/src" \
+            src/Flow.cpp \
+            tests/host/test_memory.cpp \
+            ${COMMON_STRATA_SOURCES} \
+            -o /tmp/flow-memory-tests
+          /tmp/flow-memory-tests
 
   host-sanitizers:
     runs-on: [self-hosted, zekstack-ci]
@@ -62,15 +87,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Fetch Strata
+        run: |
+          rm -rf "${RUNNER_TEMP}/flow-strata"
+          git clone --depth 1 --branch "${STRATA_VERSION}" \
+            https://github.com/ZekStack/strata.git \
+            "${RUNNER_TEMP}/flow-strata"
+
       - name: Build and run ASan and UBSan tests
         run: |
+          STRATA_DIR="${RUNNER_TEMP}/flow-strata"
           g++ -std=c++20 -Wall -Wextra -Werror -pedantic -pthread \
             -fsanitize=address,undefined \
             -fno-omit-frame-pointer \
             -Itests/host/stubs \
             -Isrc \
+            -I"${STRATA_DIR}/src" \
             src/Flow.cpp \
             tests/host/test_flow.cpp \
+            "${STRATA_DIR}/src/strata/Allocation.cpp" \
+            "${STRATA_DIR}/src/strata/Diagnostics.cpp" \
+            "${STRATA_DIR}/src/strata/internal/PlatformGeneric.cpp" \
             -o /tmp/flow-host-sanitizers
           ASAN_OPTIONS=detect_leaks=1 /tmp/flow-host-sanitizers
 
@@ -81,15 +118,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Fetch Strata
+        run: |
+          rm -rf "${RUNNER_TEMP}/flow-strata"
+          git clone --depth 1 --branch "${STRATA_VERSION}" \
+            https://github.com/ZekStack/strata.git \
+            "${RUNNER_TEMP}/flow-strata"
+
       - name: Build and run ThreadSanitizer tests
         run: |
+          STRATA_DIR="${RUNNER_TEMP}/flow-strata"
           g++ -std=c++20 -Wall -Wextra -Werror -pedantic -pthread \
             -fsanitize=thread \
             -fno-omit-frame-pointer \
             -Itests/host/stubs \
             -Isrc \
+            -I"${STRATA_DIR}/src" \
             src/Flow.cpp \
             tests/host/test_flow.cpp \
+            "${STRATA_DIR}/src/strata/Allocation.cpp" \
+            "${STRATA_DIR}/src/strata/Diagnostics.cpp" \
+            "${STRATA_DIR}/src/strata/internal/PlatformGeneric.cpp" \
             -o /tmp/flow-host-tsan
           TSAN_OPTIONS=halt_on_error=1 /tmp/flow-host-tsan
 
@@ -150,6 +199,7 @@ jobs:
                 --board ${{ matrix.board }} \
                 --lib="." \
                 --project-option "platform=${PIOARDUINO_PLATFORM_URL}" \
+                --project-option "lib_deps=https://github.com/ZekStack/strata.git#${STRATA_VERSION}" \
                 --project-option "build_unflags=-std=gnu++11" \
                 --project-option "build_flags=-std=gnu++20"
             fi
@@ -195,12 +245,16 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install "esp32:esp32@${ESP32_CORE_VERSION}"
 
-      - name: Add local library to sketchbook
+      - name: Add local libraries to sketchbook
         run: |
           set -e
           SKETCHBOOK_DIR="${HOME}/Arduino"
           mkdir -p "$SKETCHBOOK_DIR/libraries/Flow"
           rsync -a --delete --exclude ".git" ./ "$SKETCHBOOK_DIR/libraries/Flow/"
+          rm -rf "$SKETCHBOOK_DIR/libraries/Strata"
+          git clone --depth 1 --branch "${STRATA_VERSION}" \
+            https://github.com/ZekStack/strata.git \
+            "$SKETCHBOOK_DIR/libraries/Strata"
 
       - name: Build examples (${{ matrix.board.name }})
         env:

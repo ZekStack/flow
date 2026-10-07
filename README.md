@@ -2,7 +2,7 @@
 
 Flow is a finite state machine library for Arduino ESP32 projects.
 
-It provides explicit transitions, guards, actions, enter and exit callbacks, optional FreeRTOS mutex protection, fixed inline callback storage, and runtime diagnostics. Flow is designed for small feature-owned state machines with bounded setup-time allocation and no Flow heap allocation during `setState()`.
+It provides explicit transitions, guards, actions, enter and exit callbacks, optional FreeRTOS mutex protection, fixed inline callback storage, Strata-backed bounded state storage, and runtime diagnostics. Flow is designed for small feature-owned state machines with bounded setup-time allocation and no Flow or Strata allocation during `setState()`.
 
 [![CI](https://github.com/ZekStack/flow/actions/workflows/ci.yml/badge.svg)](https://github.com/ZekStack/flow/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/ZekStack/flow?sort=semver)](https://github.com/ZekStack/flow/releases)
@@ -15,6 +15,7 @@ It provides explicit transitions, guards, actions, enter and exit callbacks, opt
 - **Fixed callback storage** — capturing lambdas are stored inline with configurable capacity.
 - **Predictable runtime** — Flow performs no heap allocation in `setState()`.
 - **Production-minded** — result-based errors, diagnostics, optional thread safety, and no exceptions.
+- **Explicit memory placement** — state and transition tables use the shared Strata memory policy.
 
 ## Install
 
@@ -107,6 +108,21 @@ void loop() {
 }
 ```
 
+## Memory placement
+
+Flow `v0.2.0` uses Strata `v0.1.4` for library-owned dynamic storage.
+
+```cpp
+FlowConfig config;
+config.memory.allocation = Strata::Placement::PreferExternal;
+```
+
+`memory.allocation` controls the bounded state and transition tables. The default is `Placement::Default`, preserving Flow's previous backend-default allocation behavior. `PreferExternal` may fall back to internal memory; `RequireExternal` fails initialization when external memory is unavailable.
+
+Flow owns no tasks, so `memory.taskStack` is part of the shared ZekStack policy shape but is currently unused. When `threadSafe` is enabled, the recursive mutex control block remains internal through `Strata::FreeRTOS::RecursiveMutex`.
+
+Callbacks remain in fixed inline storage and `setState()` performs no Flow-owned or Strata allocation.
+
 ## Runtime rules
 
 Register transitions and callbacks during setup, after `init()` and before runtime state changes.
@@ -156,10 +172,10 @@ Callbacks must be copy constructible and move constructible. Capturing lambdas a
 | Platform | `espressif32` |
 | Language | C++20 |
 | Filesystem | none |
-| PSRAM | not used directly |
-| Dependencies | none |
+| PSRAM | through Strata placement policy |
+| Dependencies | Strata `v0.1.4` |
 | Exceptions | not used |
-| Version | `0.1.0` |
+| Version | `0.2.0` |
 
 ## License
 

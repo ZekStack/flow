@@ -9,6 +9,8 @@ class Flow;
 
 `State` must be default constructible, copy constructible, and equality comparable by the operations used in Flow.
 
+`FlowConfig` includes `Strata::MemoryPolicy memory`. `memory.allocation` controls the state/transition storage placement; `memory.taskStack` is currently unused because Flow owns no tasks.
+
 ## Methods
 
 ```cpp
@@ -62,4 +64,6 @@ If transition creation fails, later `guard()` and `action()` calls are no-ops an
 
 `onEnter()` and `onExit()` are also transactional when registering a previously unknown state. An oversized callback does not consume state capacity.
 
-`MaxCallbacksReached` is reserved for future multi-callback support and is not emitted by v0.1.0 production code.
+`MaxCallbacksReached` is reserved for future multi-callback support and is not emitted by v0.2.0 production code.
+
+`FlowDiag<State>` also reports the requested allocation placement and observed state, transition, and mutex-control regions.

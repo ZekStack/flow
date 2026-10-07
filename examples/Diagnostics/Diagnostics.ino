@@ -23,6 +23,7 @@ void setup() {
 	FlowConfig config;
 	config.maxStates = 3;
 	config.maxTransitions = 2;
+	config.memory.allocation = Strata::Placement::PreferExternal;
 	FlowResult result = flow.init(config, State::Idle);
 	if (!result) {
 		Serial.println(result.message);
@@ -48,6 +49,12 @@ void setup() {
 	Serial.println(diag.changedCount);
 	Serial.print("last=");
 	Serial.println(flow.statusToString(diag.lastStatus));
+	Serial.print("allocation-placement=");
+	Serial.println(Strata::toString(diag.allocationPlacement));
+	Serial.print("state-region=");
+	Serial.println(Strata::toString(diag.stateStorageRegion));
+	Serial.print("transition-region=");
+	Serial.println(Strata::toString(diag.transitionStorageRegion));
 }
 
 void loop() {

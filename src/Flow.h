@@ -1,18 +1,23 @@
 #pragma once
 
 #include <Arduino.h>
+#include <Strata.h>
 
 #include "internal/FlowFixedFunction.h"
 #include "internal/FlowMutex.h"
+#include "internal/FlowStorage.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
-#include <new>
 #include <type_traits>
 #include <utility>
 
 struct FlowConfig {
+	Strata::MemoryPolicy memory{
+	    .allocation = Strata::Placement::Default,
+	    .taskStack = Strata::Placement::Internal,
+	};
 	uint16_t maxStates = 8;
 	uint16_t maxTransitions = 16;
 	bool threadSafe = false;
@@ -74,6 +79,10 @@ template <typename State> struct FlowDiag {
 	State lastFromState{};
 	State lastToState{};
 	uint32_t lastChangeAtMs = 0;
+	Strata::Placement allocationPlacement = Strata::Placement::Default;
+	Strata::Region stateStorageRegion = Strata::Region::Unknown;
+	Strata::Region transitionStorageRegion = Strata::Region::Unknown;
+	Strata::Region mutexControlRegion = Strata::Region::Unknown;
 };
 
 template <typename State, size_t CallbackSize = 64> class Flow;
@@ -176,7 +185,8 @@ template <typename State, size_t CallbackSize> class Flow {
 			    "flow is already initialized"
 			);
 		}
-		if (config.maxStates == 0 || config.maxTransitions == 0) {
+		if (!Strata::validMemoryPolicy(config.memory) || config.maxStates == 0 ||
+		    config.maxTransitions == 0) {
 			return FlowResult::error(FlowStatus::InvalidConfig, "flow config is invalid");
 		}
 
@@ -184,16 +194,19 @@ template <typename State, size_t CallbackSize> class Flow {
 			return FlowResult::error(FlowStatus::AllocationFailed, "flow mutex allocation failed");
 		}
 
-		_states = new (std::nothrow) StateEntry[config.maxStates];
-		_transitions = new (std::nothrow) TransitionEntry[config.maxTransitions];
-		if (_states == nullptr || _transitions == nullptr) {
-			delete[] _states;
-			delete[] _transitions;
-			_states = nullptr;
-			_transitions = nullptr;
+		auto states = FlowStorage<StateEntry>::create(config.maxStates, config.memory.allocation);
+		if (!states) {
 			_mutex.destroy();
 			return FlowResult::error(FlowStatus::AllocationFailed, "flow storage allocation failed");
 		}
+		auto transitions =
+		    FlowStorage<TransitionEntry>::create(config.maxTransitions, config.memory.allocation);
+		if (!transitions) {
+			_mutex.destroy();
+			return FlowResult::error(FlowStatus::AllocationFailed, "flow storage allocation failed");
+		}
+		_states = std::move(states);
+		_transitions = std::move(transitions);
 
 		_config = config;
 		_current = initialState;
@@ -209,6 +222,11 @@ template <typename State, size_t CallbackSize> class Flow {
 		_diag.lastFromState = initialState;
 		_diag.lastToState = initialState;
 		_diag.lastStatus = FlowStatus::Ok;
+		_diag.allocationPlacement = config.memory.allocation;
+		_diag.stateStorageRegion = _states.region();
+		_diag.transitionStorageRegion = _transitions.region();
+		_diag.mutexControlRegion =
+		    config.threadSafe ? _mutex.controlRegion() : Strata::Region::Unknown;
 
 		const FlowStatus status = ensureState(initialState);
 		if (status != FlowStatus::Ok) {
@@ -233,10 +251,8 @@ template <typename State, size_t CallbackSize> class Flow {
 				);
 			}
 
-			delete[] _states;
-			delete[] _transitions;
-			_states = nullptr;
-			_transitions = nullptr;
+			_states.reset();
+			_transitions.reset();
 			_stateCount = 0;
 			_transitionCount = 0;
 			_busy = false;
@@ -915,8 +931,8 @@ template <typename State, size_t CallbackSize> class Flow {
 
 	FlowConfig _config{};
 	FlowMutex _mutex;
-	StateEntry *_states = nullptr;
-	TransitionEntry *_transitions = nullptr;
+	FlowStorage<StateEntry> _states;
+	FlowStorage<TransitionEntry> _transitions;
 	uint16_t _stateCount = 0;
 	uint16_t _transitionCount = 0;
 	State _current{};

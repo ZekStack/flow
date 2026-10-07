@@ -1,48 +1,41 @@
 #pragma once
 
 #include <Arduino.h>
-
-#include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
+#include <strata/freertos/Mutex.h>
 
 class FlowMutex {
   public:
 	FlowMutex() = default;
 
-	~FlowMutex() {
-		destroy();
-	}
-
 	FlowMutex(const FlowMutex &) = delete;
 	FlowMutex &operator=(const FlowMutex &) = delete;
 
 	bool create() {
-		if (_handle != nullptr) {
+		if (_mutex) {
 			return true;
 		}
-		_handle = xSemaphoreCreateRecursiveMutex();
-		return _handle != nullptr;
+		_mutex = Strata::FreeRTOS::RecursiveMutex::create();
+		return static_cast<bool>(_mutex);
 	}
 
 	void destroy() {
-		if (_handle != nullptr) {
-			vSemaphoreDelete(_handle);
-			_handle = nullptr;
-		}
+		_mutex.reset();
 	}
 
 	bool lock(TickType_t timeout = portMAX_DELAY) {
-		return _handle != nullptr && xSemaphoreTakeRecursive(_handle, timeout) == pdTRUE;
+		return _mutex.lock(timeout);
 	}
 
 	void unlock() {
-		if (_handle != nullptr) {
-			xSemaphoreGiveRecursive(_handle);
-		}
+		_mutex.unlock();
+	}
+
+	Strata::Region controlRegion() const {
+		return _mutex.controlRegion();
 	}
 
   private:
-	SemaphoreHandle_t _handle = nullptr;
+	Strata::FreeRTOS::RecursiveMutex _mutex;
 };
 
 class FlowLock {
