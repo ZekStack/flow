@@ -23,13 +23,13 @@ void expect(bool condition, const char *message) {
 void testDefaultMemoryPolicy() {
 	Flow<State> flow;
 	FlowConfig config;
-	expect(flow.init(config, State::Idle), "default memory policy initializes");
+	expect(static_cast<bool>(flow.init(config, State::Idle)), "default memory policy initializes");
 	FlowDiag<State> diag = flow.getDiagnostics();
 	expect(
 	    diag.allocationPlacement == Strata::Placement::Default,
 	    "default diagnostics report default allocation placement"
 	);
-	expect(flow.deinit(), "default memory policy deinitializes");
+	expect(static_cast<bool>(flow.deinit()), "default memory policy deinitializes");
 }
 
 void testPlacementCanChangeAcrossReinit() {
@@ -37,24 +37,24 @@ void testPlacementCanChangeAcrossReinit() {
 
 	FlowConfig internalConfig;
 	internalConfig.memory.allocation = Strata::Placement::Internal;
-	expect(flow.init(internalConfig, State::Idle), "internal allocation initializes");
+	expect(static_cast<bool>(flow.init(internalConfig, State::Idle)), "internal allocation initializes");
 	expect(
 	    flow.getDiagnostics().allocationPlacement == Strata::Placement::Internal,
 	    "internal placement is retained in diagnostics"
 	);
-	expect(flow.deinit(), "internal allocation deinitializes");
+	expect(static_cast<bool>(flow.deinit()), "internal allocation deinitializes");
 
 	FlowConfig preferredExternalConfig;
 	preferredExternalConfig.memory.allocation = Strata::Placement::PreferExternal;
 	expect(
-	    flow.init(preferredExternalConfig, State::Idle),
+	    static_cast<bool>(flow.init(preferredExternalConfig, State::Idle)),
 	    "preferred external allocation reinitializes"
 	);
 	expect(
 	    flow.getDiagnostics().allocationPlacement == Strata::Placement::PreferExternal,
 	    "preferred external placement is retained in diagnostics"
 	);
-	expect(flow.deinit(), "preferred external allocation deinitializes");
+	expect(static_cast<bool>(flow.deinit()), "preferred external allocation deinitializes");
 }
 
 void testUnsupportedRequiredExternalIsTransactional() {
@@ -70,8 +70,8 @@ void testUnsupportedRequiredExternalIsTransactional() {
 
 	FlowConfig fallback;
 	fallback.memory.allocation = Strata::Placement::Internal;
-	expect(flow.init(fallback, State::Idle), "Flow initializes after transactional allocation failure");
-	expect(flow.deinit(), "Flow deinitializes after transactional allocation failure");
+	expect(static_cast<bool>(flow.init(fallback, State::Idle)), "Flow initializes after transactional allocation failure");
+	expect(static_cast<bool>(flow.deinit()), "Flow deinitializes after transactional allocation failure");
 }
 
 void testInvalidMemoryPolicyIsRejected() {
@@ -97,12 +97,12 @@ void testThreadSafeMutexUsesStrata() {
 	Flow<State> flow;
 	FlowConfig config;
 	config.threadSafe = true;
-	expect(flow.init(config, State::Idle), "thread-safe Flow initializes");
+	expect(static_cast<bool>(flow.init(config, State::Idle)), "thread-safe Flow initializes");
 	expect(
 	    flow.getDiagnostics().mutexControlRegion == Strata::Region::Unknown,
 	    "generic host reports unknown mutex control region"
 	);
-	expect(flow.deinit(), "thread-safe Flow deinitializes");
+	expect(static_cast<bool>(flow.deinit()), "thread-safe Flow deinitializes");
 }
 
 void testSetStateDoesNotAllocateThroughStrata() {
@@ -111,7 +111,7 @@ void testSetStateDoesNotAllocateThroughStrata() {
 	config.memory.allocation = Strata::Placement::Internal;
 	config.maxStates = 2;
 	config.maxTransitions = 1;
-	expect(flow.init(config, State::Idle), "allocation-free runtime test initializes");
+	expect(static_cast<bool>(flow.init(config, State::Idle)), "allocation-free runtime test initializes");
 	expect(
 	    flow.transition(State::Idle, State::Ready).action([]() {}).status() == FlowStatus::Ok,
 	    "allocation-free runtime transition registers"
