@@ -69,7 +69,8 @@ reject(
 reject(r"(?<![:\w])new\s*\(\s*std::nothrow", "direct nothrow new ownership is forbidden")
 reject(r"(?<![:\w])new\s+(?!\()", "direct new ownership is forbidden")
 reject(r"(?<![:\w])delete\s*\[", "direct array delete ownership is forbidden")
-reject(r"\b(?:malloc|calloc|realloc|free)\s*\(", "direct C heap ownership is forbidden")
+reject(r"\b(?:malloc|calloc|realloc)\s*\(", "direct C heap ownership is forbidden")
+reject(r"(?<!Strata::)\bfree\s*\(", "direct C heap ownership is forbidden")
 
 if errors:
     print("\n".join(errors))
