@@ -1,5 +1,7 @@
 # Flow
 
+> Current version: **v0.3.0**. The Strata dependency remains pinned to **v0.1.4**.
+
 Flow is a finite state machine library for Arduino ESP32 projects.
 
 It provides explicit transitions, guards, actions, enter and exit callbacks, optional FreeRTOS mutex protection, fixed inline callback storage, Strata-backed bounded state storage, and runtime diagnostics. Flow is designed for small feature-owned state machines with bounded setup-time allocation and no Flow or Strata allocation during `setState()`.
@@ -110,7 +112,7 @@ void loop() {
 
 ## Memory placement
 
-Flow `v0.2.0` uses Strata `v0.1.4` for library-owned dynamic storage.
+Flow `v0.3.0` uses Strata `v0.1.4` for library-owned dynamic storage.
 
 ```cpp
 FlowConfig config;
@@ -175,7 +177,7 @@ Callbacks must be copy constructible and move constructible. Capturing lambdas a
 | PSRAM | through Strata placement policy |
 | Dependencies | Strata `v0.1.4` |
 | Exceptions | not used |
-| Version | `0.2.0` |
+| Version | `0.3.0` |
 
 ## License
 

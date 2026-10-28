@@ -1,6 +1,6 @@
 {
   "name": "Flow",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Finite state machine library for ESP32 feature state.",
   "keywords": [
     "esp32",
